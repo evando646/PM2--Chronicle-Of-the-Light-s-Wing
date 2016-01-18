@@ -1,0 +1,757 @@
+#==============================================================================
+# TSBS Addon - Battle Camera
+# Version : 1.0
+# Language : English
+# Requires : Theolized SBS version 1.4
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# Contact :
+#------------------------------------------------------------------------------
+# *> http://www.rpgmakerid.com
+# *> http://www.rpgmakervxace.net
+# *> http://theolized.blogspot.com
+#==============================================================================
+($imported ||= {})[:TSBS_Camera] = true
+#==============================================================================
+# Change Logs:
+# -----------------------------------------------------------------------------
+# 2014.10.05 - Added sprite rewriter for later compatibility patch
+#            - Compatibility patch with YES Damage Popup / Luna Engine
+# 2014.09.25 - Finished final version 1.0
+# 2014.08.28 - Finished initial version 0.8
+#==============================================================================
+%Q{
+
+  ===================
+  || Introduction ||
+  -------------------
+  This script adds battle camera effect where you could move the camera focus
+  or even zoom the battle screen.
+  
+  =================
+  || How to use ||
+  -----------------
+  Put this script below TSBS implementation part.
+  If you have YES Damage Popup / Luna Engine, put those scripts above this 
+  battle camera
+  
+  To call the camera effect, select one of these command format.
+  
+  1st Format --> [:camera, scope, [x, y], dur, zoom, (method)],
+  2nd Format --> [:camera, "Camera Key"],
+  
+  Note if you use the first format :
+  > Scope   : Scope position where camera should focus. There're 5 avalaible
+              options can be used. They're 
+              [0: Target] [1: Self] [2: All Enemies] [3: All Allies] 
+              [4: Everyone] [5: Screen]
+              
+  > [x, y]  : Relative position from the scope
+  > dur     : Camera move duration in frame
+  > zoom    : Camera zoom value. Should filled by float. e.g, 1.0 or 1.5
+  > method  : Movement method. Choose between :linear, :smooth
+  
+  Example :
+  [:camera, 0, [0, 0], 56, 1.15],
+  [:camera, 0, [0, 0], 56, 1.15, :smooth],
+  
+  Note if you use the second format :
+  "Camera Key" is similar as action key. It stored in CAM_PRESETUP in 
+  configuration part below.
+  
+  To reset the position of camera, call this command
+  Format --> [:cam_reset, dur, (method)],
+  
+  ===================
+  || Terms of use ||
+  -------------------
+  Credit me, TheoAllen. You are free to edit this script by your own. As long
+  as you don't claim it yours. For commercial purpose, don't forget to give me
+  a free copy of the game.
+
+  =====================
+  || Special Thanks ||
+  ---------------------
+  - Galenmereth / Tor Damian Design for easing movement algorithm
+  - Journey Battle System / Tankentai VXA as inspiration
+  - Anyone who requested this feature
+  
+}
+#==============================================================================
+# Editable region
+#==============================================================================
+module TSBS # <-- Do not touch
+ #============================================================================
+  DEFAULT_CAM_METHOD = :smooth
+ #----------------------------------------------------------------------------
+ # Default camera movement method. There're two avalaible movement methods.
+ # Choose between them
+ # > :linear 
+ # > :smooth
+ # 
+ # For constant movement, choose :linear
+ # For smoother movement, choose :smooth
+ #============================================================================
+ # Camera pre setup. Made for easier call
+ #----------------------------------------------------------------------------
+  CAM_PRESETUP = {
+# "Camera Key"  => [scope,[x, y], dur, zoom, (method)]
+  "Everyone"    => [4    ,[0, 0],  56,  1.0],
+  "Screen"      => [5    ,[0, 0],  56,  1.0],
+  
+  "Target"      => [0, [100, -50], 75, 1.00],
+  "Actor"       => [1, [100, -50], 55, 1.00],
+  
+  "Actors"      => [3, [-100, 0], 55, 1.00],
+  "Actors2"     => [5, [50, 20], 55, 1.00],
+  "Enemies"     => [2, [100, 0], 55, 1.00],
+  "Enemies2"    => [5, [-50, 20], 55, 1.00],
+ 
+  } # <-- don't touch
+ #============================================================================
+ # Camera focus change when selecting certain command
+ # Set all to nil if you don't want to use these
+ #----------------------------------------------------------------------------
+  CAMERA_ACTOR_COMMAND  = "Actors2"   # When selecting actor command
+  CAMERA_ENEMY_SELECT   = "Enemies2"  # When selecting enemy
+  CAMERA_TURN_START     = "Screen"    # When turn start
+ #============================================================================
+ # Some bugfixes
+ #----------------------------------------------------------------------------
+  CAMERA_YEA_POPUP_FIX  = true  # If you using YEA/YES Damage Popup
+  CAMERA_ANIMATION_ZOOM = true  # Is animation also need to be scalled?
+ #============================================================================
+ # Camera command call. Used to call camera function like [:camera, ...]
+ #----------------------------------------------------------------------------
+  CAMERA_MOVE     = :camera
+  CAMERA_RESET    = :cam_reset
+ #============================================================================= 
+end # <-- Do not touch
+#==============================================================================
+# * End of editable region
+#------------------------------------------------------------------------------
+# Below this line may dangerous to enter. There're many monster inside. Do not
+# enter unless you're pretty confident or have sufficient skills.
+#==============================================================================
+if $imported[:TSBS] # Compatibility flag
+#==============================================================================
+module TSBS
+#==============================================================================
+# ** TSBS::Camera
+#------------------------------------------------------------------------------
+#  This class handles camera metadata
+#==============================================================================
+  class Camera
+    attr_accessor :zoom
+    attr_accessor :x
+    attr_accessor :y
+    #--------------------------------------------------------------------------
+    # * Initialize
+    #--------------------------------------------------------------------------
+    def initialize
+      reset_camera
+      clear_movement_flag
+    end
+    #--------------------------------------------------------------------------
+    # * Reset camera metadata
+    #--------------------------------------------------------------------------
+    def reset_camera
+      @zoom = 1.0
+      @x = 0.0
+      @y = 0.0
+      @shake_v = 0.0
+      @shake_h = 0.0
+      @shake_count_v = 0.0
+      @shake_count_h = 0.0
+    end
+    #--------------------------------------------------------------------------
+    # * Clear movement flag
+    #--------------------------------------------------------------------------
+    def clear_movement_flag
+      @fiber = nil
+      @total_dur = 0
+      @duration = 0
+      @ori_x = 0.0
+      @ori_y = 0.0
+      @ori_zoom = 0.0
+      @target_x = 0.0
+      @target_y = 0.0
+      @target_zoom = 0.0
+    end
+    #--------------------------------------------------------------------------
+    # * Interpret camera key
+    #--------------------------------------------------------------------------
+    def interpret_camera(key)
+      return if key.nil?
+      camera = CAM_PRESETUP[key]
+      if camera.nil?
+        ErrorSound.play
+        text = "Camera error on : #{@used_sequence}\n" + 
+        "Uninitialized camera constant \"#{@acts[1]}\""
+        msgbox text
+        exit
+      end
+      case camera[0]
+      when 2 # All Enemies
+        battlers = $game_troop.alive_members
+      when 3 # All Allies
+        battlers = $game_party.alive_members
+      when 4 # Everyone
+        battlers = $game_troop.alive_members + $game_party.alive_members
+      else # Screen
+        battlers = nil
+      end
+      unless camera[1].is_a?(Array)
+        ErrorSound.play
+        msgbox "Camera error on : #{@used_sequence}\n" + 
+        "Second parameter should be array"
+        exit
+      end
+      point_x = camera[1][0]
+      point_y = camera[1][1]
+      dur = camera[2]
+      zoom = camera[3]
+      method = camera[4] || DEFAULT_CAM_METHOD
+      unless respond_to?(method)
+        ErrorSound.play
+        msgbox "Camera error on : #{@used_sequence}\nWrong method name"
+        exit
+      end
+      move_camera(battlers, point_x, point_y, dur, zoom, method)
+    end
+    #--------------------------------------------------------------------------
+    # * Move camera
+    #--------------------------------------------------------------------------
+    def move_camera(battlers, x, y, dur, zoom, method)
+      clear_movement_flag
+      @duration = dur
+      if battlers
+        size = battlers.size
+        point_x = battlers.inject(0) {|r, battler| r + battler.rel_x}.to_f/size
+        point_y = battlers.inject(0) {|r, battler| r + battler.rel_y}.to_f/size
+      else
+        point_x = 0
+        point_y = 0
+      end
+      @ori_x = @x
+      @ori_y = @y
+      @ori_zoom = @zoom
+      @target_x = (point_x + x).to_f 
+      @target_y = (point_y + y).to_f
+      @target_zoom = zoom
+      @fiber = Fiber.new { update_camera(method) }
+    end
+    #--------------------------------------------------------------------------
+    # * The distance position of X axis
+    #--------------------------------------------------------------------------
+    def dist_x(x)
+      dist = Graphics.width/2 - x
+      return (@x * @zoom) + (dist * (@zoom - 1.0)) + @shake_h
+    end
+    #--------------------------------------------------------------------------
+    # * The distance position of Y axis
+    #--------------------------------------------------------------------------
+    def dist_y(y)
+      dist = Graphics.height/2 - y
+      return (@y * @zoom) + (dist * (@zoom - 1.0)) + @shake_v
+    end
+    #--------------------------------------------------------------------------
+    # * Update. Called once per frame
+    #--------------------------------------------------------------------------
+    def update
+      @fiber.resume if @fiber
+      return unless $imported[:TSBS_BattleDecor]
+      horz = backdrop_settings[:shake_h]
+      vert = backdrop_settings[:shake_v]
+      @shake_count_h = (@shake_count_h + horz[0]) % 360
+      @shake_count_v = (@shake_count_v + vert[0]) % 360
+      @shake_h = Math.sin(Math.radian(@shake_count_h)) * vert[1]
+      @shake_v = Math.sin(Math.radian(@shake_count_v)) * vert[1]
+      if $game_system.backdecor_refresh[:camera]
+        @shake_count_h = @shake_count_v = 0
+        $game_system.backdecor_refresh[:camera] = false
+      end
+    end
+    #--------------------------------------------------------------------------
+    # * Camera is moving?
+    #--------------------------------------------------------------------------
+    def moving?
+      !@fiber.nil?
+    end
+    #--------------------------------------------------------------------------
+    # * Update camera movement
+    #--------------------------------------------------------------------------
+    def update_camera(method_name)
+      @duration.times do |t|
+        @x = send(method_name, t, @ori_x, @target_x - @ori_x, @duration).round
+        @y = send(method_name, t, @ori_y, @target_y - @ori_y, @duration).round
+        @zoom = send(method_name, t, @ori_zoom, @target_zoom - @ori_zoom, 
+          @duration)
+        Fiber.yield
+      end
+      @x = @target_x
+      @y = @target_y
+      @zoom = @target_zoom
+      clear_movement_flag
+    end
+    # -------------------------------------------------------------------------
+    # * Easing movement method : Linear
+    # -------------------------------------------------------------------------
+    def linear(time, start, change, total_time)
+      return change * time / total_time + start
+    end
+    # -------------------------------------------------------------------------
+    # * Easing movement method : Smooth
+    # -------------------------------------------------------------------------
+    def smooth(time, start, change, total_time)
+      time /= total_time.to_f
+      time -= 1
+      return change*(time*time*time + 1) + start
+    end
+  end
+#==============================================================================
+# ** Screen_Point
+#------------------------------------------------------------------------------
+#  This class created to supports camera reposition
+#==============================================================================
+  class Screen_Point
+    alias tsbs_cam_screen_x screen_x
+    alias tsbs_cam_screen_y screen_y
+    def screen_x
+      tsbs_cam_screen_x - $tsbs_camera.dist_x(self.x)
+    end
+    
+    def screen_y
+      tsbs_cam_screen_y - $tsbs_camera.dist_y(self.y)
+    end
+  end
+end
+
+#==============================================================================
+# ** TSBS Sprite Rewriter
+#------------------------------------------------------------------------------
+#  Rewriter module for sprite to change how X,Y are handled in sprite in order
+# to work with battle camera. To use this module, include this module to any
+# sprite subclass and initialize the Screen_Point at initialize method. Don't
+# forget to make alias for tsbs_x= and tsbs_y=
+#
+#  Use this module to provide more compatibility patches among various scripts
+# See the examples at the end of this script
+#==============================================================================
+
+def point_rewrite
+  alias_method "tsbs_x=", "x="
+  alias_method "tsbs_y=", "y="
+end
+
+module TSBS_SpriteRewriter
+  #----------------------------------------------------------------------------
+  # * X=
+  #----------------------------------------------------------------------------
+  def x=(x)
+    return if disposed?
+    @screen_point.x = x
+    self.tsbs_x = @screen_point.screen_x
+  end
+  #----------------------------------------------------------------------------
+  # * Y=
+  #----------------------------------------------------------------------------
+  def y=(y)
+    return if disposed?
+    @screen_point.y = y
+    self.tsbs_y = @screen_point.screen_y
+  end
+  #----------------------------------------------------------------------------
+  # * Overwrite method : Basic X,Y
+  #----------------------------------------------------------------------------
+  def x; @screen_point.x; end
+  def y; @screen_point.y; end
+end
+
+#==============================================================================
+# ** DataManager
+#------------------------------------------------------------------------------
+#  This module manages the database and game objects. Almost all of the 
+# global variables used by the game are initialized by this module.
+#==============================================================================
+
+class << DataManager
+  # --------------------------------------------------------------------------
+  # Alias method : Create game objects
+  # --------------------------------------------------------------------------  
+  alias tsbs_cam_create_obj create_game_objects
+  def create_game_objects
+    tsbs_cam_create_obj
+    $tsbs_camera = TSBS::Camera.new
+  end
+  
+end
+
+#==============================================================================
+# ** Game_Backdrop
+#------------------------------------------------------------------------------
+#  This class handles battleback metadata to simulate battleback replacement.
+# Instance of this class included within the Game_Temp class
+#==============================================================================
+
+class Game_Backdrop
+  
+  alias tsbs_cam_zoom_1 zoom_1
+  alias tsbs_cam_zoom_2 zoom_2
+  
+  def zoom_1
+    tsbs_cam_zoom_1 * $tsbs_camera.zoom
+  end
+  
+  def zoom_2
+    tsbs_cam_zoom_2 * $tsbs_camera.zoom
+  end
+  
+end
+
+#==============================================================================
+# ** Game_Battler
+#------------------------------------------------------------------------------
+#  A battler class with methods for sprites and actions added. This class 
+# is used as a super class of the Game_Actor class and Game_Enemy class.
+#==============================================================================
+
+class Game_Battler
+  # --------------------------------------------------------------------------
+  # Alias method : Custom sequence handler
+  # --------------------------------------------------------------------------
+  alias tsbs_cam_custom_sequence custom_sequence_handler
+  def custom_sequence_handler
+    tsbs_cam_custom_sequence
+    case @acts[0]
+    when CAMERA_MOVE;   setup_camera_move
+    when CAMERA_RESET;  setup_camera_reset
+    end
+  end
+  # --------------------------------------------------------------------------
+  # New method : Setup camera move
+  # --------------------------------------------------------------------------
+  def setup_camera_move
+    if @acts[1].is_a?(String)
+      camera = CAM_PRESETUP[@acts[1]]
+      if camera.nil?
+        ErrorSound.play
+        text = "Camera error on : #{@used_sequence}\n" + 
+        "Uninitialized camera constant \"#{@acts[1]}\""
+        msgbox text
+        exit
+      end
+      @acts = [@acts[0]] + camera
+    end
+    return TSBS.error(@acts[0], 4, @used_sequence) if @acts.size < 5
+    case @acts[1]
+    when 0 # Current target
+      battlers = target_array
+    when 1 # Self
+      battlers = [self]
+    when 2 # All Enemies
+      battlers = opponents_unit.alive_members
+    when 3 # All Allies
+      battlers = friends_unit.alive_members
+    when 4 # Everyone
+      battlers = opponents_unit.alive_members + friends_unit.alive_members
+    else # Screen
+      battlers = nil
+    end
+    unless @acts[2].is_a?(Array)
+      ErrorSound.play
+      msgbox "Camera error on : #{@used_sequence}\n" + 
+      "Second parameter should be array"
+      exit
+    end
+    point_x = @acts[2][0]
+    point_y = @acts[2][1]
+    dur = @acts[3]
+    zoom = @acts[4]
+    method = @acts[5] || DEFAULT_CAM_METHOD
+    unless $tsbs_camera.respond_to?(method)
+      ErrorSound.play
+      msgbox "Camera error on : #{@used_sequence}\nWrong method name"
+      exit
+    end
+    $tsbs_camera.move_camera(battlers, point_x, point_y, dur, zoom, method)
+  end
+  # --------------------------------------------------------------------------
+  # New method : Setup camera reset
+  # --------------------------------------------------------------------------
+  def setup_camera_reset
+    return TSBS.error(@acts[0], 1, @used_sequence) if @acts.size < 2
+    $tsbs_camera.move_camera(nil, 0, 0, @acts[1], 1.0, @acts[2] || 
+      DEFAULT_CAM_METHOD)
+  end
+    
+end
+
+#==============================================================================
+# ** Game_Actor
+#------------------------------------------------------------------------------
+#  This class handles actors. It is used within the Game_Actors class
+# ($game_actors) and is also referenced from the Game_Party class ($game_party)
+#==============================================================================
+
+class Game_Actor
+  alias tsbs_cam_screen_x screen_x
+  alias tsbs_cam_screen_y screen_y
+  # --------------------------------------------------------------------------
+  # Alias method : Screen X
+  # --------------------------------------------------------------------------
+  def screen_x
+    tsbs_cam_screen_x - $tsbs_camera.dist_x(self.x)
+  end
+  # --------------------------------------------------------------------------
+  # Alias method : Screen Y
+  # --------------------------------------------------------------------------
+  def screen_y
+    tsbs_cam_screen_y - $tsbs_camera.dist_y(self.y)
+  end
+  
+end
+
+#==============================================================================
+# ** Game_Enemy
+#------------------------------------------------------------------------------
+#  This class handles enemies. It used within the Game_Troop class 
+# ($game_troop).
+#==============================================================================
+
+class Game_Enemy
+  alias tsbs_cam_screen_x screen_x
+  alias tsbs_cam_screen_y screen_y
+  # --------------------------------------------------------------------------
+  # Alias method : Screen X
+  # --------------------------------------------------------------------------
+  def screen_x
+    tsbs_cam_screen_x - $tsbs_camera.dist_x(self.x)
+  end
+  # --------------------------------------------------------------------------
+  # Alias method : Screen Y
+  # --------------------------------------------------------------------------
+  def screen_y
+    tsbs_cam_screen_y - $tsbs_camera.dist_y(self.y)
+  end
+  
+end
+
+#==============================================================================
+# ** Sprite_BattlerIcon
+#------------------------------------------------------------------------------
+#  This sprite is used to display battler's Icon. It observes icon key from
+# Game_Battler class and automatically changes sprite display when triggered.
+#==============================================================================
+
+class Sprite_BattlerIcon
+  # --------------------------------------------------------------------------
+  # Alias method : Update
+  # --------------------------------------------------------------------------
+  alias tsbs_cam_update update
+  def update
+    tsbs_cam_update
+    self.zoom_x = self.zoom_y = $tsbs_camera.zoom
+  end
+  
+end
+
+#==============================================================================
+# ** Sprite_Battler
+#------------------------------------------------------------------------------
+#  This sprite is used to display battlers. It observes an instance of the
+# Game_Battler class and automatically changes sprite states.
+#==============================================================================
+
+class Sprite_Battler
+  # --------------------------------------------------------------------------
+  # Alias method : Update
+  # --------------------------------------------------------------------------
+  alias tsbs_cam_update_pos update_position
+  def update_position
+    self.zoom_x = self.zoom_y = $tsbs_camera.zoom
+    tsbs_cam_update_pos
+  end
+  
+end
+
+#==============================================================================
+# ** Scene_Battle
+#------------------------------------------------------------------------------
+#  This class performs battle screen processing.
+#==============================================================================
+
+class Scene_Battle
+  # --------------------------------------------------------------------------
+  # Alias method : Update basic
+  # --------------------------------------------------------------------------
+  alias tsbs_cam_update_basic update_basic
+  def update_basic
+    tsbs_cam_update_basic
+    $tsbs_camera.update
+  end
+  
+  alias tsbs_cam_start_actor_cmd start_actor_command_selection
+  def start_actor_command_selection
+    tsbs_cam_start_actor_cmd
+    $tsbs_camera.interpret_camera(TSBS::CAMERA_ACTOR_COMMAND)
+  end
+  
+  alias tsbs_cam_enemy_select select_enemy_selection
+  def select_enemy_selection
+    tsbs_cam_enemy_select
+    $tsbs_camera.interpret_camera(TSBS::CAMERA_ENEMY_SELECT)
+  end
+  
+  alias tsbs_cam_on_enemy_cancel on_enemy_cancel
+  def on_enemy_cancel
+    tsbs_cam_on_enemy_cancel
+    $tsbs_camera.interpret_camera(TSBS::CAMERA_ACTOR_COMMAND)
+  end
+  
+  alias tsbs_cam_turn_start turn_start
+  def turn_start
+    tsbs_cam_turn_start
+    $tsbs_camera.interpret_camera(TSBS::CAMERA_TURN_START)
+    update_basic while $tsbs_camera.moving?
+  end
+  
+  alias tsbs_cam_terminate terminate
+  def terminate
+    tsbs_cam_terminate
+    $tsbs_camera.reset_camera
+  end
+  
+end
+
+#==============================================================================#
+#                 BELOW THIS LINE ARE COMPATIBILITY PATCHES!                   #
+#==============================================================================#
+
+#==============================================================================
+# ** YEA Battle Engine Popup fix
+#------------------------------------------------------------------------------
+#  Just glitch fix for YEA damage popup for anyone who bothered. Overwrite 
+# some methods from YEA Battle Engine
+#==============================================================================
+
+if $imported["YEA-BattleEngine"] && TSBS::CAMERA_YEA_POPUP_FIX
+#==============================================================================
+if !$imported["YES-BattlePopup"]
+class Sprite_Battler
+  def create_new_popup(value, rules, flags)
+    return if @battler == nil
+    return if flags & @popup_flags != []
+    array = YEA::BATTLE::POPUP_RULES[rules]
+    for popup in @popups
+      popup.screen_point.y -= 24
+    end
+    return unless SceneManager.scene.is_a?(Scene_Battle)
+    return if SceneManager.scene.spriteset.nil?
+    view = SceneManager.scene.spriteset.viewportPopups
+    new_popup = Sprite_Popup.new(view, @battler, value, rules, flags)
+    @popups.push(new_popup)
+    @popup_flags.push("weakness") if flags.include?("weakness")
+    @popup_flags.push("resistant") if flags.include?("resistant")
+    @popup_flags.push("immune") if flags.include?("immune")
+    @popup_flags.push("absorbed") if flags.include?("absorbed")
+  end
+end # Sprite Battler
+
+class Sprite_Popup < Sprite_Base
+  #----------------------------------------------------------------------------
+  # * Alias method : Basic x= y=
+  #----------------------------------------------------------------------------
+  point_rewrite
+  include TSBS_SpriteRewriter
+  #--------------------------------------------------------------------------
+  # initialize
+  #--------------------------------------------------------------------------
+  alias tsbs_cam_init initialize
+  def initialize(viewport, battler, value, rules, flags)
+    @screen_point = TSBS::Screen_Point.new
+    tsbs_cam_init(viewport, battler, value, rules, flags)
+  end
+  
+  def create_popup_bitmap
+    rules_array = YEA::BATTLE::POPUP_RULES[@rules]
+    bw = Graphics.width
+    bw += 48 if @flags.include?("state")
+    bh = Font.default_size * 3
+    bitmap = Bitmap.new(bw, bh)
+    bitmap.font.name = rules_array[8]
+    size = @flags.include?("critical") ? rules_array[2] * 1.2 : rules_array[2]
+    bitmap.font.size = size
+    bitmap.font.bold = rules_array[3]
+    bitmap.font.italic = rules_array[4]
+    if flags.include?("critical")
+      crit = YEA::BATTLE::POPUP_RULES["CRITICAL"]
+      bitmap.font.out_color.set(crit[5], crit[6], crit[7], 255)
+    else
+      bitmap.font.out_color.set(0, 0, 0, 255)
+    end
+    dx = 0; dy = 0; dw = 0
+    dx += 24 if @flags.include?("state")
+    dw += 24 if @flags.include?("state")
+    if @flags.include?("state") || @flags.include?("buff")
+      c_width = bitmap.text_size(@value).width
+      icon_bitmap = $game_temp.iconset
+      icon_index = flag_state_icon
+      rect = Rect.new(icon_index % 16 * 24, icon_index / 16 * 24, 24, 24)
+      bitmap.blt(dx+(bw-c_width)/2-36, (bh - 24)/2, icon_bitmap, rect, 255)
+    end
+    bitmap.font.color.set(rules_array[5], rules_array[6], rules_array[7])
+    bitmap.draw_text(dx, dy, bw-dw, bh, @value, 1)
+    self.bitmap = bitmap
+    self.x = @battler.x # Rewriting this
+    self.x += rand(4) - rand(4) if @battler.sprite.popups.size >= 1
+    self.x -= SceneManager.scene.spriteset.viewport1.ox
+    self.y = @battler.x - @battler.sprite.oy/2 # Rewriting this
+    self.y -= @battler.sprite.oy/2 if @battler.actor?
+    self.y -= SceneManager.scene.spriteset.viewport1.oy
+    self.y += YEA::BATTLE::POPUP_SETTINGS[:offset]
+    self.ox = bw/2; self.oy = bh/2
+    self.zoom_x = self.zoom_y = rules_array[0]
+    if @flags.include?("no zoom")
+      self.zoom_x = self.zoom_y = rules_array[1]
+    end
+    @target_zoom = rules_array[1]
+    @zoom_direction = (self.zoom_x > @target_zoom) ? "down" : "up"
+    self.z = 500
+  end
+
+  
+end # Sprite_Popup
+
+end # !$imported["YES-BattlePopup"]
+
+end # $imported["YEA-BattleEngine"] && TSBS::CAMERA_YEA_POPUP_FIX
+#==============================================================================  
+if $imported["YES-BattlePopup"]
+  
+class Sprite_PopupLuna < Sprite
+  point_rewrite
+  include TSBS_SpriteRewriter
+  
+  alias tsbs_init_luna initialize
+  def initialize(*args)
+    @screen_point = TSBS::Screen_Point.new
+    tsbs_init_luna(*args)
+  end
+  #----------------------------
+  # Overwrite start popup
+  #----------------------------
+  def start_popup
+    self.bitmap = create_bitmap
+    self.x = @battler.x
+    self.y = @battler.y
+    self.ox = self.bitmap.width / 2
+    self.oy = self.bitmap.height
+    self.z = @battler.screen_z + 350
+  end
+
+end
+
+#==============================================================================
+end # $imported["YES-BattlePopup"]
+
+end # $imported[:TSBS]

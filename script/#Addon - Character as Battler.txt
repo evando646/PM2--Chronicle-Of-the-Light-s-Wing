@@ -1,0 +1,78 @@
+#==============================================================================
+# TSBS Addon - Character as Battler
+# Version : 1.0 (Beta)
+# Language : English
+# Requires : Theolized SBS version 1.4
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# Contact :
+#------------------------------------------------------------------------------
+# *> http://www.rpgmakerid.com
+# *> http://www.rpgmakervxace.net
+# *> http://www.theolized.com
+#==============================================================================
+($imported ||= {})[:TSBS_CharBattler] = true
+#==============================================================================
+%Q{
+
+  ==================
+  || Introduction ||
+  ------------------
+  Feels like redundant if you want to put the same battler and character in
+  Graphics/characters folder? When basically their images are same, but why
+  they're separated?
+  
+  This addon bring back Tankentai SBS function where it will take image from
+  the Graphics/characters folder as battler
+  
+  ================
+  || How to use ||
+  ----------------
+  Put this script below TSBS implementation
+  If you're using Basename Changer, put this above that addon
+  
+  ===================
+  || Terms of use ||
+  -------------------
+  Credit me, TheoAllen. You are free to edit this script by your own. As long
+  as you don't claim it yours. For commercial purpose, don't forget to give me
+  a free copy of the game.
+
+}
+#==============================================================================
+# Tidak ada konfigurasi
+#==============================================================================
+if $imported[:TSBS]
+class << Cache
+  attr_accessor :battler_redirect
+  
+  alias tsbs_charbattler_battler battler
+  def battler(name, hue)
+    return charbattler(name, hue) if battler_redirect
+    return tsbs_charbattler_battler(name, hue)
+  end
+  
+  def charbattler(name, hue)
+    return character(name)
+  end
+  
+end
+
+class Game_Actor
+  
+  def base_battler_name
+    return character_name
+  end
+  
+end
+
+class Sprite_Battler
+  
+  alias tsbs_charbattler_update_bitmap update_bitmap
+  def update_bitmap
+    Cache.battler_redirect = true if battler && battler.actor?
+    tsbs_charbattler_update_bitmap
+    Cache.battler_redirect = false
+  end
+  
+end
+end

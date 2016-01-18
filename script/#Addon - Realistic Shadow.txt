@@ -1,0 +1,118 @@
+#==============================================================================
+# TSBS Addon - Realistic Shadow
+# Version : 1.0
+# Language : English
+# Requires : Theolized Sideview Battle System
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# Contact :
+#------------------------------------------------------------------------------
+# *> http://www.rpgmakerid.com
+# *> http://www.rpgmakervxace.net
+# *> http://theolized.blogspot.com
+#==============================================================================
+($imported ||= {})[:TSBS_RealShadow] = true
+#==============================================================================
+# Change Logs:
+# -----------------------------------------------------------------------------
+# 2013.08.21 - Finished script
+#==============================================================================
+=begin
+
+  ===================
+  || Introduction ||
+  -------------------
+  This TSBS addon will make the shadow more realistic. It projects the sprite
+  and draw it as a shadow. Best used in sideview style (not isometric looks
+  battle system) and custom spriteset. Because it won't show icon shadow if you 
+  plan to use show weapon icon
+  
+  =================
+  || How to use ||
+  -----------------
+  This script is plug and play. Just put this below the TSBS implementation
+  
+  ===================
+  || Terms of use ||
+  -------------------
+  Credit me, TheoAllen. You are free to edit this script by your own. As long
+  as you don't claim it yours. For commercial purpose, don't forget to give me
+  a free copy of the game.  
+  
+=end
+#==============================================================================
+# Configurations
+#==============================================================================
+module TSBS
+  module RShadow
+    
+    Opacity = 190 # Shadow opacity. The lesser, the more transparent it will be
+    Scale   = 0.5 # Shadow scale from the original source
+    
+  end
+end
+#==============================================================================
+# End of configuration. Do not edit anything pass this line!
+#==============================================================================
+if $imported[:TSBS]
+#==============================================================================
+# ** Sprite_BattlerShadow
+#------------------------------------------------------------------------------
+#  This sprite is used to display battler's shadow. 
+#==============================================================================
+class Sprite_BattlerShadow < Sprite
+  # --------------------------------------------------------------------------
+  # * Initialize
+  # --------------------------------------------------------------------------
+  def initialize(sprite_battler, viewport = nil)
+    @sprite_battler = sprite_battler
+    super(viewport)
+    update_reference
+    self.angle = 180
+    self.mirror = true
+    self.color.set(Color.new(0,0,0))
+    update
+  end
+  # --------------------------------------------------------------------------
+  # * Update Reference
+  # --------------------------------------------------------------------------
+  def update_reference
+    self.bitmap = @sprite_battler.bitmap
+    src_rect.set(@sprite_battler.src_rect)
+  end
+  # --------------------------------------------------------------------------
+  # * Update Size
+  # --------------------------------------------------------------------------
+  def update_size
+    self.zoom_y = TSBS::RShadow::Scale * ($imported[:TSBS_Camera] ? 
+      $tsbs_camera.zoom : 1.0)
+    self.zoom_x = ($imported[:TSBS_Camera] ? $tsbs_camera.zoom : 1.0)
+    self.ox = width/2
+    self.oy = height
+  end
+  # --------------------------------------------------------------------------
+  # * Update opacity
+  # --------------------------------------------------------------------------
+  def update_opacity
+    self.opacity = TSBS::RShadow::Opacity * (@sprite_battler.opacity/255.0)
+  end
+  # --------------------------------------------------------------------------
+  # * Update
+  # --------------------------------------------------------------------------
+  def update
+    super
+    update_size
+    update_position
+    update_opacity
+    update_visible
+    update_reference
+  end
+  # --------------------------------------------------------------------------
+  # * Update
+  # --------------------------------------------------------------------------  
+  def shift_y
+#~     return 0 if @sprite_battler.battler.is_a?(Game_Enemy)
+    return -4 * ($imported[:TSBS_Camera] ? $tsbs_camera.zoom : 1.0)
+  end
+end
+
+end # $imported[:TSBS]

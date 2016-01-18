@@ -1,0 +1,47 @@
+class Window_BestiaryPic < Window_Base
+  def draw_enemy_sprite
+    return unless @item.is_a?(RPG::Enemy)
+    @battler = Game_Enemy.new(0,@item.id)
+    if FantasyBestiary::Battleback_Full_Screen
+      @ew_x = @window_x
+      @ew_y = @window_y
+      @enemyviewport = Viewport.new(@ew_x, @ew_y, Graphics.width, 
+        Graphics.height)
+    else
+      @ew_x = @window_x + (FantasyBestiary::Enemy_Picture_Padding)
+      @ew_y = @window_y + (FantasyBestiary::Enemy_Picture_Padding)
+      @ew_width = @window_width - (FantasyBestiary::Enemy_Picture_Padding * 2)
+      @ew_height = @window_height - (FantasyBestiary::Enemy_Picture_Padding * 2)
+      @enemyviewport = Viewport.new(@ew_x, @ew_y, @ew_width, @ew_height)
+    end
+    @enemyviewport.z = 3
+    @enemyviewport.z = 1002 if !FantasyBestiary::Battleback_Full_Screen
+    @enemypic = Sprite_Battler.new(@enemyviewport, @battler)
+    @enemypic.update
+    ebx = @enemypic.width / 2
+    eby = @enemypic.height / 2
+    if FantasyBestiary::Battleback_Full_Screen
+      ex = @window_width / 2
+      ey = @window_height / 2
+      @battler.x = ex - ebx + @item.x_offset
+      @battler.y = ey - eby + @item.y_offset
+    else
+      ex = @enemyviewport.rect.width / 2
+      ey = @enemyviewport.rect.height / 2
+      @battler.x = ex - ebx + @item.x_offset
+      @battler.y = ey - eby + @item.y_offset
+    end
+    @battler.flip = true if @item.bestiary_mirror || 
+      FantasyBestiary::Global_Mirror
+    @battler.on_battle_start
+    @enemypic.update
+  end
+  
+  alias tsbs_fantasy_bestiary_update update
+  def update
+    tsbs_fantasy_bestiary_update
+    @battler.update if @battler
+    @enemypic.update if @enemypic
+  end
+  
+end

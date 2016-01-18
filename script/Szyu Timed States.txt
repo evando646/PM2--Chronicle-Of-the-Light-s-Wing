@@ -1,0 +1,150 @@
+#==============================================================================
+# Timed States
+# Version 1.1
+# By Szyu
+#
+# About:
+# Create states, which trigger specific skills after they expire.
+# For example a time bomb skill, which applies the "bomb"-state which automatically
+# expires after 3 rounds. Then it will trigger a "detonation"-skill, which deals
+# damage and applies a "burn"-state.
+#
+# Instructions:
+# - Place below "Materials" but above "Main Process".
+#
+# How to Use:
+# - <timed: skill_id>
+# - <timed: skill_id1, skill_id2, ..., skill_idn>
+# This note in a state will let it trigger all skills defined after "timed:",
+# when the state expires. Mean if a state lasts 5 rounds, the skills are 
+# triggered after round 5.
+#
+# When there are multiple skills set, the battle scene will trigger them sorted
+# from left to right.
+#
+# The expiration time is specified with the removal condition in the database.
+#
+# 
+# Example:
+# <timed: 10, 50> will first trigger skill[10] and then skill[50]
+#
+#
+# Requires:
+# - RPG Maker VX Ace
+#
+# Terms of Use:
+# - Free for commercal and non-commercial use. Please list me
+#   in the credits to support my work.
+#
+# Pastebin:
+# http://pastebin.com/ye790Zsy
+#
+#
+#==============================================================
+#   * Game_Battler
+#==============================================================
+class Game_Battler < Game_BattlerBase
+  
+  alias sz_update_timed_states update_state_turns
+  def update_state_turns
+    sz_update_timed_states
+    update_timed_states
+  end
+  
+  def update_timed_states
+    states.each do |state|
+      if state.timed && @state_turns[state.id] == 0
+        state.triggered_skills.each do |s|
+          BattleManager.triggering_timed_states.push(RPG::EventCommand.new(339, 0, get_ts_params(s)))
+        end
+      end
+    end
+  end
+  
+  def get_ts_params(skill)
+    if self.is_a?(Game_Enemy)
+      return [0, self.index, skill, self.index]
+    elsif self.is_a?(Game_Actor)
+      return [1, self.character_index + 1, skill, self.index]
+    else
+      return [0, 0, 0, 0]
+    end
+  end
+end
+
+#==============================================================
+#   * BattleManager
+#==============================================================
+module BattleManager
+  class << self
+    attr_accessor :triggering_timed_states
+    alias sz_ts_setup setup
+    alias sz_ts_turn_end turn_end
+  end
+  
+  def self.setup(troop_id, can_escape = true, can_lose = false)
+    sz_ts_setup(troop_id, can_escape, can_lose)
+    @triggering_timed_states = []
+  end
+  
+  def self.turn_end
+    sz_ts_turn_end
+    if @triggering_timed_states.size > 0
+      $game_troop.interpreter.setup(@triggering_timed_states.clone)
+      @triggering_timed_states.clear
+    end
+  end
+end
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#==============================================================
+#   * Initialize BaseItems
+#==============================================================
+module DataManager
+  class << self
+    alias load_db_timer_notes load_database
+  end
+  
+  def self.load_database
+    load_db_timer_notes
+    load_sz_timer_items
+  end
+  
+  def self.load_sz_timer_items
+    groups = [$data_states]
+    for group in groups
+      for obj in group
+        next if obj.nil?
+        obj.load_sz_state_timer
+      end
+    end
+  end
+end
+
+#==============================================================
+#   * Notes
+#==============================================================
+class RPG::State < RPG::BaseItem
+  attr_accessor :timed
+  attr_accessor :triggered_skills
+  
+  def load_sz_state_timer
+    @timed = false
+    @triggered_skills = []
+    
+    self.note.split(/[\r\n]+/).each do |line|
+      scan_sz_timer_data(line)
+    end
+  end
+  
+  def scan_sz_timer_data(line)
+    return unless line =~ /<timed:\s*([\d+\s*,?\s*]+)>/i ? true : false
+    @timed = true
+    skills = $1.scan(/\s*,?\d+,?\s*/i)
+    skills.each do |skill|
+      @triggered_skills.push(skill.to_i)
+    end
+  end
+  
+end
