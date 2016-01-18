@@ -1,0 +1,16 @@
+class RPG::Animation
+  
+  def ani_rate
+    return $1.to_i if name[/<rate:(\d+)>/i]
+    return 3
+  end
+  
+end
+
+class Sprite_Base
+  
+  def set_animation_rate
+    @ani_rate = @animation.ani_rate
+  end
+  
+end

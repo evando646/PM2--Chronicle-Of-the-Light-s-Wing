@@ -1,0 +1,128 @@
+# =============================================================================
+# TheoAllen - Pause anywhere at anytime
+# Version : 1.0
+# Contact : www.rpgmakerid.com (or) http://theolized.blogspot.com
+# (English Documentation)
+# =============================================================================
+($imported ||= {})[:Theo_Pause] = true
+# =============================================================================
+# Change Logs:
+# -----------------------------------------------------------------------------
+# 2014.01.16 - Finished script
+# =============================================================================
+=begin
+
+  Introduction :
+  This script allow you to pause anywhere at anytime
+  
+  How to use :
+  Put this script below material but above main
+  Edit the config if necessary
+
+  Terms of Use :
+  Credit me, TheoAllen. You are free to edit this script by your own. As long 
+  as you don't claim it yours. For commercial purpose, don't forget to give me 
+  a free copy of the game.
+  
+=end
+# =============================================================================
+# Configuration
+# =============================================================================
+module Theo
+  module Pause
+  # --------------------------------------------------------------------------
+    Color         = Color.new(0,0,0,69)
+  # Background color. Fill in this format : Color.new(red,green,blue,alpha)
+    Text          = "Pause"
+  # Text which will be displayed in pause
+  # --------------------------------------------------------------------------
+    FontName      = ["Calibri"] # Used font
+    FontSize      = 72          # Font size
+    FontBold      = true        # Bold?
+    FontItalic    = true        # Italic?
+  # --------------------------------------------------------------------------
+    DisplayPause  = false  # Display pause text?
+  # Why is this necessary? It's actually for my own good. I need to screenshot
+  # an awesome action. So I need to freeze the screen for a brief time. Just
+  # to make sure my timing is right
+    Button        = :ALT  # Button to trigger pause or unpause
+  # --------------------------------------------------------------------------
+  end
+end
+# =============================================================================
+# End of configuration
+# =============================================================================
+class Sprite_Screen < Sprite
+  
+  def initialize(viewport = nil)
+    super(viewport)
+    self.bitmap = Bitmap.new(Graphics.width,Graphics.height)
+  end
+  
+  def dispose
+    self.bitmap.dispose
+    super
+  end
+  
+end
+
+class Bitmap
+  
+  def entire_fill(color = Color.new(0,0,0,150))
+    fill_rect(self.rect,color)
+  end
+  
+end
+
+class Scene_Base
+  
+  alias scene_start start
+  def start
+    @pause_flag = false
+    scene_start
+    @pause_viewport = Viewport.new
+    @pause_viewport.z = 999
+    @pause_sprite = Sprite_Screen.new
+    @pause_sprite.viewport = @pause_viewport
+    @pause_sprite.bitmap.entire_fill(Theo::Pause::Color)
+    @pause_sprite.bitmap.font.name = Theo::Pause::FontName
+    @pause_sprite.bitmap.font.size = Theo::Pause::FontSize
+    @pause_sprite.bitmap.font.bold = Theo::Pause::FontBold
+    @pause_sprite.bitmap.font.italic = Theo::Pause::FontItalic
+    @pause_sprite.bitmap.draw_text(@pause_sprite.bitmap.rect,
+      Theo::Pause::Text, 1)
+    @pause_sprite.visible = false
+  end
+  
+  alias pause_update update_basic
+  def update_basic
+    pause_update
+    if Input.trigger?(Theo::Pause::Button)
+      @pause_flag = true
+      @pause_sprite.visible = true if Theo::Pause::DisplayPause
+      @saved_framecount = Graphics.frame_count
+      while @pause_flag
+        update_for_pause
+      end
+    end
+  end
+  
+  def update_for_pause
+    Graphics.update
+    Input.update
+    if Input.trigger?(Theo::Pause::Button)
+      @pause_flag = false
+      Graphics.frame_count = @saved_framecount
+      @pause_sprite.visible = false
+      Input.update
+    end
+  end
+  
+  alias scene_terminate terminate
+  def terminate
+    scene_terminate
+    @pause_viewport.dispose
+    @pause_sprite.dispose
+  end
+  
+end

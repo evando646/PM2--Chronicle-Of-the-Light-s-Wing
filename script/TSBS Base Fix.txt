@@ -1,0 +1,26 @@
+=begin
+as already discussed with some scripters in this topic
+http://forums.rpgmakerweb.com/index.php?/topic/32850-incorrectly-using-alias-as-super/
+
+I'm afraid if my TSBS soon will run into some problems since I used the same
+case. Therefore, I made this snippet
+
+Please put this snippet above all other custom scripts
+  
+Special thanks :
+- Tsukihime for pointing this out
+- Another Fen for the problem solving
+
+=end
+
+class Game_Actor
+  def on_battle_start
+    super
+  end
+end
+
+class Game_Enemy
+  def on_battle_start
+    super
+  end
+end

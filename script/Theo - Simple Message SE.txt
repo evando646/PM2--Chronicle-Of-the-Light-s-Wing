@@ -1,0 +1,82 @@
+# =============================================================================
+# TheoAllen - Simple Message SE
+# Version : 1.0
+# Contact : www.rpgmakerid.com (or) http://theolized.blogspot.com
+# (This script documentation is written in informal indonesian language)
+# =============================================================================
+($imported ||= {})[:Theo_MessageSE] = true
+# =============================================================================
+# CHANGE LOGS:
+# -----------------------------------------------------------------------------
+# 2013.07.20 - Finished script
+# =============================================================================
+=begin
+
+  Perkenalan :
+  Script ini bekerja untuk play SE saat proses penulisan text pada window
+  message (typing message)
+  
+  Cara penggunaan :
+  Pasang script ini dibawah material namun diatas main
+  Edit konfigurasinya
+  
+  Terms of Use :
+  Credit gw, TheoAllen. Kalo semisal u bisa ngedit2 script gw trus jadi lebih
+  keren, terserah. Ane bebasin. Asal ngga ngeklaim aja. Kalo semisal mau
+  dipake buat komersil, jangan lupa, gw dibagi gratisannya.
+
+=end
+# =============================================================================
+# Konfigurasi :
+# =============================================================================
+module THEO
+  module MSG
+    
+    # Nama file SE yang harus ada di Audio/SE
+    FileName  = "Cursor1"
+    
+    # Volume SE yang akan dibunyikan
+    Volume    = 80
+    
+    # Pitch SE yang akan dibunyikan
+    Pitch     = 100
+    
+    # Perbedaan pitch tiap kali dibunyikan
+    RandPitch = 10 # (jika pitch 110 dan RandPitch 10 maka pitch = 100 - 120)
+    
+    # Jeda karakter untuk ngebunyiin SE
+    CharWait  = 3
+    
+    # Switch ID untuk ngedisable play message SE (ON = disable)
+    Switch_id = 0
+    
+  end
+end
+# =============================================================================
+# Akhir dari konfigurasi :
+# =============================================================================
+class Window_Message < Window_Base
+  include THEO::MSG  
+  
+  alias theo_msg_se_init initialize
+  def initialize(*args)
+    theo_msg_se_init(*args)
+    @charwait = 0
+  end
+  
+  alias theo_wait_one_char_se wait_for_one_character
+  def wait_for_one_character
+    theo_wait_one_char_se
+    play_msg_se unless @show_fast || @line_show_fast
+  end
+  
+  def play_msg_se
+    @charwait += 1
+    return if $game_switches[Switch_id]
+    return unless @charwait % [CharWait,1].max == 0
+    pitch = Pitch + (rand(RandPitch*2) - RandPitch)
+    name = sprintf("Audio/SE/%s",FileName)
+    Audio.se_play(name,Volume,pitch)
+  end
+  
+end
